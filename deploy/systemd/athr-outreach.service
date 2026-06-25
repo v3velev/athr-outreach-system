@@ -1,0 +1,15 @@
+# systemd service for the athr daily outreach run (Linux VPS).
+# Install: see deploy/systemd/README.md
+[Unit]
+Description=athr daily job-to-outreach run
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# EDIT these two paths to match where you cloned the project and which user runs it:
+WorkingDirectory=/opt/athr_outreach_system
+ExecStart=/opt/athr_outreach_system/scripts/run_once.sh
+User=athr
+# don't let a single run hang forever
+TimeoutStartSec=1800

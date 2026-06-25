@@ -1,0 +1,241 @@
+# ==========================================================================
+# athr daily outreach automation - BEHAVIOUR CONFIG (non-secret)
+# ==========================================================================
+# Everything tunable lives here. Secrets live in .env. Safe to commit.
+# The client edits this file to change targeting, limits, copy, etc.
+# ==========================================================================
+
+run:
+  # Ceiling on OUTREACH (actual sends) per run - for sender-reputation ramp.
+  # Start small while testing, raise once happy.
+  max_new_companies_per_run: 40
+
+  # Ceiling on ATTEMPTS (companies scraped + enriched) per run - bounds runtime.
+  # Reality check: only ~5-10% of zaplata companies are contactable (most don't
+  # expose a website), so the run stops at whichever ceiling it hits first.
+  # At 200 attempts expect roughly 10-20 sends. Raise for more volume + longer runs.
+  max_attempts_per_run: 200
+
+  # Politeness delay between web requests, in seconds (min..max, randomised).
+  # zaplata tolerates fast; jobs.bg soft-rate-limits, so keep >=3s for it.
+  request_delay_seconds: [1.5, 3.5]
+
+  # On the very FIRST run the seen-database is empty. To avoid blasting every
+  # historical posting, ignore anything older than this many days on run #1.
+  first_run_max_age_days: 3
+
+  # Where outputs/state live (relative to project root).
+  data_dir: "data"
+
+sources:
+  # Primary backbone - no Cloudflare, clean JSON-LD, runs from any host.
+  zaplata:
+    enabled: true
+    # Sectors to crawl. We scrape ALL of these, then the ICP filter drops
+    # the bad ones - so it is fine to include broad sectors here.
+    # (Confirmed-live slugs as of 2026-06; add/remove freely.)
+    sectors:
+      - hoteli                                      # hotels
+      - restoranti-zavedeniia                       # restaurants
+      - proizvodstvo                                # production / manufacturing
+      - shofiori-i-kurieri                          # drivers / couriers
+      - ohrana                                      # security
+      - prodavachi-i-pomoshten-personal             # sales / support staff
+      - administrativni-deynosti                    # administration
+      - remont-serviz-poddrazhka                    # repair / service / maintenance
+      - arhitektura-stroitelstvo-i-gradoustroystvo  # architecture / construction
+      - energetika                                  # energy
+      - upraviteli-i-eksperti                       # managers / experts
+      - kontakt-tsentrove-call-centers              # call centres
+    max_pages_per_sector: 5   # ~20 ads/page; stops early when a page repeats
+
+  # High-volume bonus - Cloudflare-gated, paced. Best from a residential IP.
+  jobsbg:
+    enabled: false            # turn on once the client confirms IP tolerates it
+    categories:               # SEO category slugs (NOT the blocked search endpoint)
+      - hospitality
+      - construction
+      - engineering
+      - finance
+      - education
+    max_pages_per_category: 3
+
+  # Supplementary coverage. Off by default (messier markup).
+  jobtiger:
+    enabled: false
+
+icp:
+  geo:
+    # Only keep jobs physically located in these countries (JSON-LD country code).
+    # Drops the ~15% "work abroad" agency postings. BG = Bulgaria.
+    allowed_countries: ["BG"]
+
+  # Sectors above are pre-filtered. This is an extra keyword gate on the JOB
+  # TITLE / description in case a board mixes things in. Drop saturated IT.
+  exclude_title_keywords:
+    - "разработчик"      # developer
+    - "программист"      # programmer
+    - "software"
+    - "developer"
+    - "devops"
+    - "qa engineer"
+    - "frontend"
+    - "backend"
+    - "fullstack"
+    - ".net"
+    - "react"
+
+  # ---- COMPETITOR / AGENCY FILTER (critical) --------------------------------
+  # ~26% of postings come from other recruitment/staffing agencies. We must
+  # NEVER pitch recruitment services to a recruiter. Drop any employer whose
+  # name contains these tokens (case-insensitive, Latin + Cyrillic).
+  exclude_company_keywords:
+    - "консулт"          # consult
+    - "сървис"           # service(s)
+    - "персонал"         # personnel
+    - "human"            # Human Power BG, human resources
+    - "ресурс"           # resources
+    - "рикрут"           # recruit
+    - "подбор"           # selection (recruitment)
+    - "агенц"            # agency
+    - "staffing"
+    - "recruit"
+    - "talent"
+    - "select"
+    - "workforce"
+    - "employ"
+    - "hr "
+    - "ейч ар"           # "HR" spelled in Cyrillic
+    # athr's own name - never email the client themselves
+    - "athr"
+    - "ей ти ейч ар"
+
+filters:
+  # One outreach per company even if it posted 10 ads. Dedup key.
+  dedup_by: "company"          # "company" | "domain"
+  # Never contact a company we have already emailed (checked against the DB).
+  skip_already_contacted: true
+
+enrich:
+  # Scrape the company's own website for a contact email (hr@/office@/personal).
+  # PRIMARY enricher for athr's ICP: small BG businesses aren't in people-DBs like
+  # Prospeo, but ~40% expose a real email on their site. Free, no key. Prospeo
+  # (if PROSPEO_API_KEY set) is then tried as a fallback for bigger companies.
+  website_scrape: true
+
+  # FIND the company website when a posting doesn't expose one (~90% don't).
+  # The #1 yield lever - unlocks email enrichment for most companies. Uses the
+  # Parallel Search API (PARALLEL_API_KEY, ~$0.0064/company). Without the key it
+  # runs cache-only: reads data/company_websites.json and logs misses to
+  # data/website_lookups_needed.csv for Claude Code / an operator to fill in.
+  find_website: true
+
+  # DELIVERABILITY: before accepting a scraped email, check its domain can
+  # actually receive mail (MX/DNS). Drops dead/typo domains - the top bounce
+  # category that wrecks sender reputation. Install dnspython for true MX checks
+  # (pip install dnspython); without it a plain DNS-resolve check is used.
+  verify_mx: true
+
+  # VERIFY found emails (website/Parallel) with Trykitt real-time SMTP before
+  # sending - found emails aren't pre-verified like Prospeo's. Try up to this
+  # many candidates per company: verify one, and if it's not 'valid', try the
+  # next; if none verify, skip the company. (Prospeo emails skip this - already
+  # BounceBan-verified.) Needs TRYKITT_API_KEY; without it, MX-only is used.
+  verify_attempts: 3
+
+  # Which decision-maker titles to look for at each hiring company, in priority
+  # order. Prospeo searches the company for people matching these. First good
+  # verified-email match wins. Bulgarian + English variants.
+  target_titles:
+    - "Управител"            # Managing Director / Owner
+    - "Собственик"           # Owner
+    - "CEO"
+    - "Managing Director"
+    - "HR Manager"
+    - "HR Director"
+    - "Ръководител Човешки ресурси"
+    - "Operations Manager"
+    - "Оперативен директор"
+    - "Office Manager"
+    - "Управител обект"
+  # How many decision-makers to reach per company (1-3). Set to 3 to email up
+  # to the top 3 people (e.g. owner + HR + ops). Each gets their own email.
+  max_contacts_per_company: 1
+
+  # Only accept emails Prospeo marks VERIFIED (skip risky/guessed).
+  require_verified_email: true
+  # Country to constrain the people search to (Prospeo "#BG" suffix added in code).
+  person_country: "Bulgaria"
+
+  # Prospeo search strategy: instead of a narrow title list, search BROADLY by
+  # seniority and EXCLUDE departments we don't pitch, then preview everyone at
+  # the company (masked, 1 credit), rank, and reveal only the chosen N (1 credit
+  # each). Surfaces owners/HR/ops we'd miss with exact-title matching.
+  prospeo:
+    # Decision-maker seniorities, down to Manager (valid Prospeo values:
+    #   C-Suite, Partner, Vice President, Director, Head, Manager, Senior, Entry, Intern).
+    seniorities: ["C-Suite", "Partner", "Vice President", "Director", "Head", "Manager"]
+    # No department filtering - at a small company anyone senior can be the
+    # hiring decision-maker, so we don't exclude by department. (Leave empty to
+    # disable; add valid dept names here to exclude specific ones.)
+    exclude_departments: []
+    # How many masked candidates to consider per company before revealing.
+    preview_pool: 25
+
+messaging:
+  language: "bg"               # Bulgarian only
+  # Sender identity used in the AI prompt + signature merge.
+  sender_name: "Ася Косаджиева"
+  sender_company: "athr."
+  sender_title: "Основател"
+  # Tone / hard rules handed to the AI writer (and the mock writer).
+  # These mirror the client's voice + deliverability rules.
+  # NOTE: this is the copy/voice - edit freely. These are sensible defaults;
+  # the actual winning message is Aleks's call. Anti-commodity + deliverability
+  # guidance baked in, but the phrasing is yours to tune.
+  rules:
+    - "Пиши на български, на 'Вие'."
+    - "Кратко: 60-110 думи. Без общи приказки и клишета."
+    - "Започни с конкретната позиция и компанията, които видяхме."
+    - "НЕ звучи като всяка друга агенция: избягвай 'богат опит', 'индивидуален подход', 'качествени кандидати'."
+    - "Една ясна стойност: можем бързо да запълним точно тази роля, защото активно търсим кандидати, не чакаме обяви."
+    - "Може да споменеш факт за доверие само ако е верен и кратко: лицензирана агенция за подбор."
+    - "Мек, нисък праг CTA - кратък разговор или просто отговор на имейла."
+    - "Без тире-тире, без емоджи, без 'covers'."
+    - "Без спам думи (напр. 'безплатно', 'гарантирано', 'оферта', 'промоция', '100%') - вредят на доставимостта."
+  # Subject line options (AI picks/varies; mock rotates).
+  subjects:
+    - "{role} - {city}"
+    - "Бързо за {role}"
+    - "{company} - {role}"
+  # Anthropic model when ANTHROPIC_API_KEY is set. Sonnet = best cost/quality
+  # at scale; switch to claude-haiku-4-5-20251001 to cut cost further.
+  model: "claude-sonnet-4-6"
+
+# ---- SECTOR -> PITCH ANGLE (the rule half of the hybrid personalization) ----
+# The rules pick the angle from the job's sector; the AI writes the line.
+sector_angles:
+  hoteli:           "сезонен и постоянен персонал за хотели - камериерки, рецепция, кухня"
+  restoranti-zavedeniia: "екипи за заведения - готвачи, сервитьори, бармани"
+  proizvodstvo:     "оператори и работници за производство, бързо и с проверка"
+  shofiori-i-kurieri: "шофьори и куриери с нужните категории"
+  ohrana:           "охранители и персонал по сигурността"
+  prodavachi-i-pomoshten-personal: "продавачи и помощен персонал за търговски обекти"
+  administrativni-deynosti: "административен и офис персонал"
+  remont-serviz-poddrazhka: "техници и персонал по поддръжка и сервиз"
+  arhitektura-stroitelstvo-i-gradoustroystvo: "квалифицирани и общи работници за строителни обекти"
+  energetika:       "технически персонал за енергийния сектор"
+  default:          "точния персонал за тази роля, бързо и без компромис с качеството"
+
+notify:
+  # Where the end-of-run summary goes. "console" always prints.
+  # "file" writes data/run_summaries/. "email" uses SmartLead-independent SMTP
+  # (configure smtp_* below) - optional.
+  channels: ["console", "file"]
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 587
+    smtp_user: ""
+    smtp_password_env: "SUMMARY_SMTP_PASSWORD"   # read this var from .env
+    to: ""

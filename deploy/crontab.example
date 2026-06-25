@@ -1,0 +1,7 @@
+# Plain cron alternative (Linux or macOS). Edit the path, then `crontab -e`
+# and paste the line. Runs every day at 09:00 local time.
+#
+# 'scripts/setup_cron.sh' installs this automatically - this file is just for
+# reference / manual setup.
+
+0 9 * * * /opt/athr_outreach_system/scripts/run_once.sh

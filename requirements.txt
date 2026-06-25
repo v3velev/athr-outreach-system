@@ -1,0 +1,13 @@
+# athr daily outreach automation - Python dependencies
+# Pinned to recent stable majors; loosen/tighten as needed.
+
+curl_cffi>=0.7.0        # Chrome-impersonating HTTP client (beats Cloudflare on jobs.bg)
+beautifulsoup4>=4.12.0  # HTML parsing
+lxml>=5.0.0             # fast parser backend for bs4
+PyYAML>=6.0             # config.yaml
+python-dotenv>=1.0.0    # load .env
+dnspython>=2.4.0        # MX-record validation of scraped emails (deliverability)
+
+# Optional: only needed if you enable the Playwright fallback scraper for jobs.bg.
+# Install the browser afterwards with:  python -m playwright install chrome
+playwright>=1.44.0

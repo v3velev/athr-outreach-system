@@ -1,0 +1,11 @@
+# systemd timer - fires the service once a day at 09:00 (with catch-up).
+[Unit]
+Description=Run athr daily outreach every day
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+# if the VPS was off at 09:00, run as soon as it's back (self-healing)
+Persistent=true
+
+[Install]
+WantedBy=timers.target

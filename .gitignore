@@ -1,0 +1,17 @@
+# secrets
+.env
+
+# runtime data / outputs
+data/
+*.db
+*.sqlite
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# os
+.DS_Store
